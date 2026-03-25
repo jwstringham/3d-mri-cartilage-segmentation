@@ -14,8 +14,8 @@ from torch.utils.data import DataLoader
 
 import setproctitle
 
-from ..utils import *        
-from ..data_loaders import KneeMRIDataset
+from ..utils import *
+from ..data_loaders import Knee7TDataset
 from ..models import vnet
 
 
@@ -51,7 +51,7 @@ def multiclass_dice(pred, target, num_classes, ignore_index=0, eps=1e-5):
 
     pred: LongTensor of shape [N]     (predicted class indices)
     target: LongTensor of shape [N]   (ground-truth class indices)
-    num_classes: total number of classes (e.g., 7)
+    num_classes: total number of classes (e.g., 9)
     ignore_index: class to ignore in Dice (usually background=0)
     """
     dice_scores = []
@@ -140,7 +140,7 @@ def test_nll(args, epoch, model, testLoader, optimizer, testF, weights):
     incorrect = 0
     numel = 0
 
-    # we’ll accumulate Dice over batches and average
+    # we'll accumulate Dice over batches and average
     dice_accum = 0.0
     dice_batches = 0
 
@@ -198,7 +198,7 @@ def adjust_opt(optAlg, optimizer, epoch):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batchSz', type=int, default=10)
+    parser.add_argument('--batchSz', type=int, default=4)  # Smaller batch for patches
     parser.add_argument('--ngpu', type=int, default=1)
     parser.add_argument('--nEpochs', type=int, default=300)
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
@@ -207,9 +207,8 @@ def main():
                         help='path to latest checkpoint (default: none)')
     parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                         help='evaluate model on validation set')
-    parser.add_argument('--data', default='data', type=str,
-                        help='path to data directory (default: data)')
-    # inference path disabled for now (we’re not doing LUNA16-style inference)
+    parser.add_argument('--data', default='7T_Data/Neal_7T_Cartilages_20200504.hdf5', type=str,
+                        help='path to 7T HDF5 data file (default: 7T_Data/Neal_7T_Cartilages_20200504.hdf5)')
     parser.add_argument('--weight-decay', '--wd', default=1e-8, type=float,
                         metavar='W', help='weight decay (default: 1e-8)')
     parser.add_argument('--no-cuda', action='store_true')
@@ -221,7 +220,7 @@ def main():
 
     best_prec1 = 100.0
     args.cuda = not args.no_cuda and torch.cuda.is_available()
-    args.save = args.save or 'work/vnet.knee.{}'.format(datestr())
+    args.save = args.save or 'work/vnet.7t.{}'.format(datestr())
     weight_decay = args.weight_decay
 
     setproctitle.setproctitle(args.save)
@@ -233,10 +232,10 @@ def main():
     # DataLoader kwargs
     kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
 
-    # Build VNet for 7 classes (0 = bg, 1..6 = cartilage compartments)
+    # Build VNet for 9 classes (0 = bg, 1..8 = cartilage/bone)
     print("build vnet")
-    num_classes = 7
-    nll = True  # we only support NLL now
+    num_classes = 9
+    nll = True
     model = vnet.VNet(elu=False, nll=nll, num_classes=num_classes)
 
     batch_size = args.ngpu * args.batchSz
@@ -261,8 +260,8 @@ def main():
         model.apply(weights_init)
 
     print('  + Number of params: {}'.format(
-        sum([p.data.nelement() for p in model.parameters()]))
-    )
+        sum([p.data.nelement() for p in model.parameters()])
+    ))
 
     # Fresh save directory
     if os.path.exists(args.save):
@@ -270,8 +269,10 @@ def main():
     os.makedirs(args.save, exist_ok=True)
 
     # Datasets / loaders
-    print("loading training set")
-    trainSet = KneeMRIDataset(root=args.data, split='train')
+    h5_path = args.data
+    slices_per_volume = 80
+    print("loading 7T training set")
+    trainSet = Knee7TDataset(h5_path, slices_per_volume=slices_per_volume, patch_size=(64, 128, 128), num_patches=10000, augment=True)
     trainLoader = DataLoader(
         trainSet,
         batch_size=batch_size,
@@ -279,8 +280,8 @@ def main():
         **kwargs
     )
 
-    print("loading validation set")
-    testSet = KneeMRIDataset(root=args.data, split='valid')
+    print("loading 7T validation set")
+    testSet = Knee7TDataset(h5_path, slices_per_volume=slices_per_volume, patch_size=(64, 128, 128), num_patches=2000, augment=False)
     testLoader = DataLoader(
         testSet,
         batch_size=batch_size,
@@ -288,7 +289,7 @@ def main():
         **kwargs
     )
 
-    # 7-class weights (can tune later)
+    # 9-class weights
     class_weights = torch.ones(num_classes, dtype=torch.float32)
     if args.cuda:
         class_weights = class_weights.cuda()
