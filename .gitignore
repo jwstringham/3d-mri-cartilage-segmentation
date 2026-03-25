@@ -6,3 +6,5 @@ data/
 7T_Data/
 results/
 trained_models/
+outputs_for_viewing/
+*.ipynb
