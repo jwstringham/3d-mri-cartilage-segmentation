@@ -2,3 +2,7 @@
 */**/*.pyc
 */**/*~
 *~
+data/
+7T_Data/
+results/
+trained_models/

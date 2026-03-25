@@ -1,6 +1,4 @@
 numpy
-torch
-torchvision
-torchbiomed
+h5py
 setproctitle
-graphviz
+matplotlib.pyplot
